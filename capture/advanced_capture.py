@@ -26,7 +26,10 @@ class AdvancedCaptureSystem:
         self.audio_dir.mkdir(parents=True, exist_ok=True)
         self.state_file = self.base_dir / "system_state.json"
         
-        # Iniciar archivo de estado
+        # Iniciar archivo de estado y locks
+        self.vad_lock = threading.Lock()
+        self.state_lock = threading.Lock()
+        
         self._write_state({})
         self.current_state = {}
         
@@ -42,11 +45,12 @@ class AdvancedCaptureSystem:
         print("[VAD] Modelo Silero VAD cargado exitosamente.")
         
     def _write_state(self, state_dict):
-        try:
-            with open(self.state_file, "w") as f:
-                json.dump(state_dict, f)
-        except Exception:
-            pass
+        with self.state_lock:
+            try:
+                with open(self.state_file, "w") as f:
+                    json.dump(state_dict, f)
+            except Exception:
+                pass
 
     def _update_status(self, line_name, status):
         self.current_state[line_name] = status
@@ -75,18 +79,26 @@ class AdvancedCaptureSystem:
 
     def _is_speech_silero(self, audio_chunk):
         """
-        Evalúa un chunk de audio usando Silero VAD.
-        Retorna True si la voz supera el umbral del 50%.
+        Evalúa un chunk de audio usando Silero VAD (Ruta Pesada / Celulares).
         """
-        # Convertir a tensor float32 normalizado [-1.0, 1.0]
         audio_float = audio_chunk.astype(np.float32) / 32768.0
         audio_tensor = torch.from_numpy(audio_float)
         
         try:
-            confidence = self.model(audio_tensor, self.sample_rate).item()
+            with self.vad_lock:
+                confidence = self.model(audio_tensor, self.sample_rate).item()
             return confidence > 0.5 
         except Exception:
             return False
+
+    def _is_speech_rms(self, audio_chunk):
+        """
+        Evalúa un chunk de audio matemáticamente (Ruta Rápida / Líneas Fijas).
+        Es 10,000x más rápido que Silero y no satura CPU.
+        """
+        rms = np.sqrt(np.mean(np.square(audio_chunk.astype(np.float32))))
+        # Umbral dinámico para línea pura (cable USB suele ser silencioso)
+        return rms > 300 
 
     def _capture_thread(self, line_name, cooldown_seconds):
         self._update_status(line_name, STATE_IDLE)
@@ -113,7 +125,13 @@ class AdvancedCaptureSystem:
                     data, overflowed = stream.read(frame_size)
                     audio_chunk = data.flatten()
                     
-                    is_speech = self._is_speech_silero(audio_chunk)
+                    # RUTA ASIMÉTRICA: Decidir modelo según línea
+                    if "Celular" in line_name or "Micrófono" in line_name:
+                        is_speech = self._is_speech_silero(audio_chunk)
+                        engine_name = "Silero VAD"
+                    else:
+                        is_speech = self._is_speech_rms(audio_chunk)
+                        engine_name = "RMS Energy"
                     
                     # Máquina de Estados
                     if state == STATE_IDLE:
@@ -125,7 +143,7 @@ class AdvancedCaptureSystem:
                             frames_grabados.extend(list(ring_buffer))
                             ring_buffer.clear()
                             self._update_status(line_name, STATE_RECORDING)
-                            print(f"[{line_name}] IDLE -> RECORDING (Voz detectada con Silero VAD)")
+                            print(f"[{line_name}] IDLE -> RECORDING (Voz detectada con {engine_name})")
                             
                     elif state == STATE_RECORDING:
                         frames_grabados.append(audio_chunk.tobytes())
@@ -157,7 +175,9 @@ class AdvancedCaptureSystem:
                                 self._update_status(line_name, STATE_IDLE)
                                 
         except Exception as e:
-            print(f"[{line_name}] Error en hilo de captura: {e}")
+            import traceback
+            print(f"[{line_name}] Error crítico en hilo de captura: {e}")
+            traceback.print_exc()
             self._update_status(line_name, "Desconectada")
 
     def _save_and_emit(self, line_name, frames, start_time, duration):

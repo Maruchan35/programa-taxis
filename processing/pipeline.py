@@ -53,25 +53,28 @@ class ProcessingPipeline:
                 continue
 
     def _process_call(self, data):
-        print(f"\n[Procesador IA] Reduciendo ruido y extrayendo texto de la llamada en {data['line_id']}...")
+        line_id = data['line_id']
+        filepath = data['filepath']
         end_time = data['start_time'] + timedelta(seconds=data['duration'])
         
-        filepath = data['filepath']
+        # RUTA ASIMÉTRICA DE PROCESAMIENTO
+        is_ruta_pesada = "Celular" in line_id or "Micrófono" in line_id
         
-        # Aplicar reducción de ruido (NoiseReduce)
-        try:
-            import noisereduce as nr
-            import scipy.io.wavfile as wav
+        if is_ruta_pesada:
+            print(f"\n[Procesador IA] Ruta PESADA ({line_id}): Aplicando reducción de ruido a la grabación...")
+            try:
+                import noisereduce as nr
+                import scipy.io.wavfile as wav
+                
+                rate, wave_data = wav.read(filepath)
+                reduced_noise = nr.reduce_noise(y=wave_data, sr=rate)
+                wav.write(filepath, rate, reduced_noise)
+                print(f"[Procesador IA] Filtro aplicado exitosamente.")
+            except Exception as e:
+                print(f"[Procesador IA] No se pudo aplicar reducción de ruido: {e}")
+        else:
+            print(f"\n[Procesador IA] Ruta RÁPIDA ({line_id}): Omitiendo filtros. Enviando directo a Whisper...")
             
-            rate, wave_data = wav.read(filepath)
-            # Reducimos ruido espectral
-            reduced_noise = nr.reduce_noise(y=wave_data, sr=rate)
-            # Guardamos sobre el mismo archivo
-            wav.write(filepath, rate, reduced_noise)
-            print(f"[Procesador IA] Filtro de reducción de ruido aplicado a {filepath}.")
-        except Exception as e:
-            print(f"[Procesador IA] No se pudo aplicar reducción de ruido: {e}")
-        
         segments_data = []
         if self.model:
             try:

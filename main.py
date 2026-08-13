@@ -36,7 +36,7 @@ def main():
             time.sleep(1)
     except KeyboardInterrupt:
         print("\nApagando micrófonos y cerrando sistema...")
-        capture_sys.stop()
+        capture.stop()
         ai_pipeline.stop()
 
 if __name__ == "__main__":
