@@ -1,0 +1,8 @@
+sqlalchemy
+customtkinter
+matplotlib
+faster-whisper
+pyannote.audio
+sounddevice
+pydub
+numpy

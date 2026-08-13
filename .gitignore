@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data and SQLite
+data/audios/*.wav
+data/*.sqlite
+data/system_state.json
+
+# Virtual environments
+venv/
+env/
+ENV/
+.env
+
+# OS Files
+.DS_Store
+Thumbs.db
